@@ -21,6 +21,11 @@ from astrbot.api.message_components import Plain, Reply
 from astrbot.api.star import Context, Star
 from astrbot.core.config.astrbot_config import AstrBotConfig
 
+try:
+    from astrbot.core.config.runtime import current_message_config
+except Exception:  # 兼容老版本
+    current_message_config = None
+
 try:  # AstrBot >= 4.29
     from astrbot.api.web import error_response, json_response, request
 
@@ -413,7 +418,38 @@ class PersonaSwitcherPlugin(Star):
                 return True
         return False
 
-    @filter.on_llm_request(priority=-100)
+    def _sync_current_message_config(
+        self, event: AstrMessageEvent, persona_id: str
+    ) -> None:
+        """把人格写进本轮消息的配置快照，避免本轮仍用旧人格。"""
+        if current_message_config is None:
+            return
+        scope = current_message_config.get()
+        if scope is None or not scope.active:
+            return
+        if scope.umo != event.unified_msg_origin:
+            return
+        cfg = scope.config
+        if not isinstance(cfg, dict):
+            return
+        agent = cfg.setdefault("agent", {})
+        if not isinstance(agent, dict):
+            return
+        runtime = agent.get("runtime", "astrbot")
+        config = agent.setdefault("config", {})
+        if not isinstance(config, dict):
+            return
+        if runtime == "astrbot":
+            persona = config.setdefault("persona", {})
+            if isinstance(persona, dict):
+                persona["persona_id"] = persona_id
+            path = "agent.config.persona.persona_id"
+        else:
+            config["persona_id"] = persona_id
+            path = "agent.config.persona_id"
+        scope.override_paths = frozenset(set(scope.override_paths) | {path})
+
+    @filter.on_llm_request(priority=1000)
     async def on_llm_request(self, event: AstrMessageEvent, req=None):
         """下一轮 LLM 请求前，把假切换落实；引用确认则先清空上下文。"""
         pending = self._pending.pop(event.unified_msg_origin, None)
@@ -433,6 +469,13 @@ class PersonaSwitcherPlugin(Star):
                 await self._reset_persona(event)
             else:
                 await self._apply_persona(event, pending.target)
+            effective_target = (
+                getattr(self.context.persona_manager, "default_persona", "default")
+                or "default"
+                if pending.action == "reset"
+                else pending.target
+            )
+            self._sync_current_message_config(event, effective_target)
         except Exception:
             logger.exception(
                 "[persona-switcher] 落实切换 %s 失败", pending.code
