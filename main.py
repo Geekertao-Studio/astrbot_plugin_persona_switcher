@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -83,6 +84,18 @@ class VoteSession:
     task: asyncio.Task | None = None
 
 
+@dataclass
+class PendingSwitch:
+    """已请求、但等下一轮消息才真正生效的人格切换。"""
+
+    umo: str
+    target: str
+    action: str
+    code: str
+    created_at: float
+    expires_at: float
+
+
 ACTIVE_VOTES: dict[str, VoteSession] = {}
 
 
@@ -136,6 +149,7 @@ class PersonaSwitcherPlugin(Star):
         self.config = config
         self._save_lock = asyncio.Lock()
         self._votes: dict[str, VoteSession] = ACTIVE_VOTES
+        self._pending: dict[str, PendingSwitch] = {}
 
         context.register_web_api(
             f"/{PLUGIN_NAME}/state",
@@ -298,6 +312,138 @@ class PersonaSwitcherPlugin(Star):
             persona_id,
         )
         return f"已切换人格为「{persona_id}」，下一条消息生效。"
+
+    async def _request_switch(
+        self,
+        event: AstrMessageEvent,
+        target: str,
+        *,
+        action: str = "switch",
+    ) -> str:
+        """请求切换。开启确认时先假切换，等下一轮消息再真正写入。"""
+        scope_error = self._scope_error(event)
+        if scope_error:
+            return scope_error
+
+        if not self._cfg_bool("confirm_context_clear", True):
+            if action == "reset":
+                await self._reset_persona(event)
+                return "已恢复默认人格。"
+            return await self._switch(event, target)
+
+        if action == "reset":
+            persona_id = None
+        else:
+            persona_id, error = await self._resolve_persona_target(event, target)
+            if error:
+                return error
+
+        return self._begin_pending(
+            event,
+            target=persona_id or "默认人格",
+            action=action,
+        )
+
+    def _begin_pending(
+        self,
+        event: AstrMessageEvent,
+        *,
+        target: str,
+        action: str,
+    ) -> str:
+        now = time.time()
+        ttl = max(60, self._cfg_int("confirm_timeout_minutes", 30) * 60)
+        code = "PS-" + secrets.token_hex(3).upper()
+        self._pending[event.unified_msg_origin] = PendingSwitch(
+            umo=event.unified_msg_origin,
+            target=target,
+            action=action,
+            code=code,
+            created_at=now,
+            expires_at=now + ttl,
+        )
+        logger.info(
+            "[persona-switcher] %s 等待确认切换到 %s（%s）",
+            event.unified_msg_origin,
+            target,
+            code,
+        )
+        return (
+            f"【人格切换确认】{code}\n"
+            f"准备切换到「{target}」。\n"
+            "当前上下文可能残留旧人格，建议清空：\n"
+            "· 引用本条消息回复「是」或「同意」→ 清空上下文后切换\n"
+            "· 不引用，直接发下一句话 → 保留上下文并切换\n"
+            f"（{max(1, ttl // 60)} 分钟内有效）"
+        )
+
+    async def _clear_context(self, event: AstrMessageEvent, req=None) -> None:
+        umo = event.unified_msg_origin
+        cid = await self.context.conversation_manager.get_curr_conversation_id(umo)
+        if cid:
+            await self.context.conversation_manager.update_conversation(
+                unified_msg_origin=umo,
+                conversation_id=cid,
+                history=[],
+            )
+        if req is not None:
+            req.contexts = []
+        event.set_extra("_clean_ltm_session", True)
+
+    @staticmethod
+    def _is_clear_confirm(event: AstrMessageEvent, pending: PendingSwitch) -> bool:
+        text = re.sub(r"\s+", "", event.message_str or "").strip("，。！!?？~～")
+        if not (
+            text in {"是", "是的", "同意", "确认", "清空", "好", "yes"}
+            or any(word in text for word in ("同意", "确认", "清空"))
+        ):
+            return False
+        self_id = str(event.get_self_id() or "")
+        for component in event.get_messages():
+            if not isinstance(component, Reply):
+                continue
+            sender_id = str(getattr(component, "sender_id", "") or "")
+            if sender_id and self_id and sender_id != self_id:
+                continue
+            quoted_text = (
+                f"{getattr(component, 'message_str', '') or ''} "
+                f"{getattr(component, 'text', '') or ''}"
+            )
+            if pending.code and pending.code in quoted_text:
+                return True
+        return False
+
+    @filter.on_llm_request()
+    async def on_llm_request(self, event: AstrMessageEvent, req=None):
+        """下一轮 LLM 请求前，把假切换落实；引用确认则先清空上下文。"""
+        pending = self._pending.pop(event.unified_msg_origin, None)
+        if not pending:
+            return
+        if time.time() > pending.expires_at + 3600:
+            logger.info(
+                "[persona-switcher] 切换确认 %s 已过期，丢弃", pending.code
+            )
+            return
+
+        clear = self._is_clear_confirm(event, pending)
+        try:
+            if clear:
+                await self._clear_context(event, req)
+            if pending.action == "reset":
+                await self._reset_persona(event)
+            else:
+                await self._apply_persona(event, pending.target)
+        except Exception:
+            logger.exception(
+                "[persona-switcher] 落实切换 %s 失败", pending.code
+            )
+            return
+        logger.info(
+            "[persona-switcher] 切换确认 %s 生效：target=%s clear=%s",
+            pending.code,
+            pending.target,
+            clear,
+        )
 
     async def _resolve_persona_target(
         self, event: AstrMessageEvent, target: str
@@ -544,6 +690,19 @@ class PersonaSwitcherPlugin(Star):
 
         if event is None:
             return
+        if self._cfg_bool("confirm_context_clear", True):
+            reminder = self._begin_pending(
+                event,
+                target=session.target,
+                action=session.action,
+            )
+            await self._send_umo_text(
+                session.umo,
+                f"【人格切换投票】{session.code} 通过"
+                f"（{len(session.votes)}/{session.threshold} 票）。\n"
+                + reminder,
+            )
+            return
         try:
             if session.action == "reset":
                 await self._reset_persona(event)
@@ -696,8 +855,9 @@ class PersonaSwitcherPlugin(Star):
                 if error:
                     yield event.plain_result(error)
                 return
-            await self._reset_persona(event)
-            yield event.plain_result("已恢复默认人格。")
+            yield event.plain_result(
+                await self._request_switch(event, "", action="reset")
+            )
             return
 
         if lowered.startswith(("允许", "allow", "禁止", "deny")) or lowered in {
@@ -715,7 +875,7 @@ class PersonaSwitcherPlugin(Star):
             if error:
                 yield event.plain_result(error)
             return
-        yield event.plain_result(await self._switch(event, action))
+        yield event.plain_result(await self._request_switch(event, action))
 
     @filter.command("人格列表", alias={"人设列表", "persona_list"})
     async def cmd_list(self, event: AstrMessageEvent):
@@ -739,7 +899,7 @@ class PersonaSwitcherPlugin(Star):
             if error:
                 yield event.plain_result(error)
             return
-        yield event.plain_result(await self._switch(event, target))
+        yield event.plain_result(await self._request_switch(event, target))
 
     @filter.command("人格重置", alias={"人设重置", "persona_reset"})
     async def cmd_reset(self, event: AstrMessageEvent):
@@ -753,8 +913,9 @@ class PersonaSwitcherPlugin(Star):
             if error:
                 yield event.plain_result(error)
             return
-        await self._reset_persona(event)
-        yield event.plain_result("已恢复默认人格。")
+        yield event.plain_result(
+            await self._request_switch(event, "", action="reset")
+        )
 
     @filter.command("人格投票", alias={"投票切换", "persona_vote"})
     async def cmd_vote(self, event: AstrMessageEvent):

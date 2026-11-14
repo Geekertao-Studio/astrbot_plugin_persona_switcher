@@ -33,6 +33,22 @@
     "default": false,
     "hint": "开启后切换人格会同时清空本会话的上下文，避免旧人格的对话残留；关闭则只换提示词，历史保留。"
   },
+  "confirm_context_clear": {
+    "description": "切换前先确认是否清空上下文",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后先假切换并提示；引用提示消息回复「是/同意」清空上下文，直接发下一句话则保留上下文并真切换。"
+  },
+  "confirm_timeout_minutes": {
+    "description": "切换确认有效期（分钟）",
+    "type": "int",
+    "default": 30,
+    "slider": {
+      "min": 1,
+      "max": 180,
+      "step": 1
+    }
+  },
   "show_prompt_preview": {
     "description": "人格列表显示提示词预览",
     "type": "bool",
