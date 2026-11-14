@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>人格切换 · 可切换人格</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">人格切换</p>
+          <h1>选择用户可以切换到哪些人格</h1>
+          <p class="lede">
+            这里勾选的人格，才会出现在用户的 <code>/人格</code> 列表里。
+            切换结果写回 AstrBot 原生会话人格，WebUI 同样可见。
+          </p>
+        </div>
+        <span id="badge" class="badge">加载中</span>
+      </header>
+
+      <section class="card">
+        <label class="switch-row">
+          <span>
+            <strong>允许使用全部人格</strong>
+            <small>开启后忽略下方勾选，用户可切换到任意人格。</small>
+          </span>
+          <input id="allow-all" type="checkbox" class="switch" />
+        </label>
+      </section>
+
+      <section class="card">
+        <div class="toolbar">
+          <div>
+            <h2>可切换人格</h2>
+            <p id="hint" class="hint">正在读取人格列表……</p>
+          </div>
+          <div class="toolbar-actions">
+            <input id="search" type="search" placeholder="搜索人格 ID" autocomplete="off" />
+            <button id="select-all" type="button" class="ghost">全选</button>
+            <button id="clear-all" type="button" class="ghost">清空</button>
+          </div>
+        </div>
+
+        <ul id="persona-list" class="persona-list" aria-live="polite"></ul>
+        <p id="empty" class="empty" hidden>还没有人格，先去 AstrBot 的人格页面创建几个吧。</p>
+      </section>
+
+      <footer class="footer">
+        <span id="status" role="status"></span>
+        <button id="save" type="button" class="primary">保存设置</button>
+      </footer>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

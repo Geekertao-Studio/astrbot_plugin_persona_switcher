@@ -1,0 +1,52 @@
+{
+  "allow_all_personas": {
+    "description": "允许使用全部人格",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后用户可切换到任意人格；关闭后只能切换到下方「可切换人格」白名单里的项。也可以在插件详情页的可视化面板里勾选。"
+  },
+  "allowed_personas": {
+    "description": "可切换人格白名单",
+    "type": "list",
+    "default": [],
+    "hint": "填写人格 ID（AstrBot WebUI 的人格标识）。开启「允许使用全部人格」时本项不生效。推荐在插件详情页的可视化面板里直接勾选。"
+  },
+  "admin_only_switch": {
+    "description": "仅管理员可切换",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，普通用户只能查看人格列表，不能切换。"
+  },
+  "allow_private_chat": {
+    "description": "允许私聊切换",
+    "type": "bool",
+    "default": true
+  },
+  "allow_group_chat": {
+    "description": "允许群聊切换",
+    "type": "bool",
+    "default": true
+  },
+  "clear_context_on_switch": {
+    "description": "切换人格时清空当前对话上下文",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后切换人格会同时清空本会话的上下文，避免旧人格的对话残留；关闭则只换提示词，历史保留。"
+  },
+  "show_prompt_preview": {
+    "description": "人格列表显示提示词预览",
+    "type": "bool",
+    "default": false,
+    "hint": "在聊天里显示每个人格 system prompt 的前 60 字。人格含私密设定时建议关闭。"
+  },
+  "max_list_items": {
+    "description": "聊天列表最多显示条数",
+    "type": "int",
+    "default": 20,
+    "slider": {
+      "min": 1,
+      "max": 100,
+      "step": 1
+    }
+  }
+}
