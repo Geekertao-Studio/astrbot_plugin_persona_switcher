@@ -14,9 +14,32 @@ import asyncio
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
-from astrbot.api.web import error_response, json_response, request
 from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.session_overrides import get_overrides, update_overrides
+
+try:  # AstrBot >= 4.29
+    from astrbot.api.web import error_response, json_response, request
+
+    _NEW_WEB_HELPERS = True
+except Exception:  # pragma: no cover - 4.16 ~ 4.28 的 Quart 兼容路径
+    from quart import jsonify, request
+
+    _NEW_WEB_HELPERS = False
+
+    def json_response(payload):
+        return jsonify(payload)
+
+    def error_response(message, status_code=400):
+        return jsonify({"status": "error", "message": message}), status_code
+
+
+async def _read_json_body() -> dict:
+    """同时兼容新旧两套请求对象。"""
+    if _NEW_WEB_HELPERS:
+        payload = await request.json(default={})
+    else:  # pragma: no cover
+        payload = await request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else {}
 
 from .core.logic import (
     RESERVED_DEFAULT_PERSONA,
@@ -432,7 +455,7 @@ class PersonaSwitcherPlugin(Star):
 
     async def api_save_state(self):
         """保存可切换人格设置。"""
-        payload = await request.json(default={})
+        payload = await _read_json_body()
         if not isinstance(payload, dict):
             return error_response("请求体必须是 JSON 对象", status_code=400)
 
