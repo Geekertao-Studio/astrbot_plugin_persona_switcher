@@ -53,13 +53,6 @@ from .core.logic import (
 
 PLUGIN_NAME = "astrbot_plugin_persona_switcher"
 
-try:  # 4.x 内部类型；老版本没有就退回普通字符串
-    from astrbot.core.star.filter.command import GreedyStr
-except Exception:  # pragma: no cover - 仅兼容旧版本
-
-    class GreedyStr(str):
-        pass
-
 
 class PersonaSwitcherPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -266,11 +259,18 @@ class PersonaSwitcherPlugin(Star):
         )
 
     # ------------------------------------------------------------------ 指令
+    @staticmethod
+    def _command_args(event: AstrMessageEvent) -> str:
+        """取指令名之后的完整参数（保留空格，不依赖内部 GreedyStr）。"""
+        text = (event.get_message_str() or "").strip()
+        parts = text.split(maxsplit=1)
+        return parts[1].strip() if len(parts) > 1 else ""
+
     @filter.command("人格", alias={"persona", "人设"})
-    async def cmd_persona(self, event: AstrMessageEvent, args: GreedyStr = ""):
+    async def cmd_persona(self, event: AstrMessageEvent):
         """人格：查看当前人格、列表或切换。"""
         umo = event.unified_msg_origin
-        action = (args or "").strip()
+        action = self._command_args(event)
         lowered = action.lower()
 
         if lowered in {"", "帮助", "help", "?"}:
@@ -324,9 +324,10 @@ class PersonaSwitcherPlugin(Star):
         yield event.plain_result(await self._render_status(event.unified_msg_origin))
 
     @filter.command("人格切换", alias={"人设切换", "切人格", "persona_switch"})
-    async def cmd_switch(self, event: AstrMessageEvent, target: GreedyStr = ""):
+    async def cmd_switch(self, event: AstrMessageEvent):
         """切换到指定人格：/人格切换 <编号或ID>。"""
-        if not (target or "").strip():
+        target = self._command_args(event)
+        if not target:
             yield event.plain_result("用法：/人格切换 <编号或人格ID>，先发 /人格 看列表。")
             return
         yield event.plain_result(await self._switch(event, target))
@@ -342,20 +343,22 @@ class PersonaSwitcherPlugin(Star):
         yield event.plain_result("已恢复默认人格。")
 
     @filter.command("人格允许", alias={"人设允许", "persona_allow"})
-    async def cmd_allow(self, event: AstrMessageEvent, target: GreedyStr = ""):
+    async def cmd_allow(self, event: AstrMessageEvent):
         """管理员：把人格加入可切换列表。/人格允许 <编号|ID|全部>"""
         if not event.is_admin():
             yield event.plain_result("只有管理员能修改可切换人格。")
             return
+        target = self._command_args(event)
         async for result in self._admin_update(event, f"允许 {target}".strip()):
             yield result
 
     @filter.command("人格禁止", alias={"人设禁止", "persona_deny"})
-    async def cmd_deny(self, event: AstrMessageEvent, target: GreedyStr = ""):
+    async def cmd_deny(self, event: AstrMessageEvent):
         """管理员：把人格移出可切换列表。/人格禁止 <编号|ID|全部>"""
         if not event.is_admin():
             yield event.plain_result("只有管理员能修改可切换人格。")
             return
+        target = self._command_args(event)
         async for result in self._admin_update(event, f"禁止 {target}".strip()):
             yield result
 
