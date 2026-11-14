@@ -828,7 +828,7 @@ class PersonaSwitcherPlugin(Star):
         show_preview = self._cfg_bool("show_prompt_preview", False)
         preview_by_id = {row["id"]: row["preview"] for row in all_rows}
 
-        lines: list[str] = ["可切换人格："]
+        lines: list[str] = [f"当前人格：{current}", "", "可切换人格："]
         rendered = []
         for index, persona_id in enumerate(allowed, start=1):
             mark = "（当前）" if persona_id == current else ""
@@ -867,10 +867,11 @@ class PersonaSwitcherPlugin(Star):
         action = self._command_args(event)
         lowered = action.lower()
 
-        if lowered in {"", "帮助", "help", "?"}:
+        if lowered in {"帮助", "help", "?"}:
             yield event.plain_result(
                 "人格切换\n"
                 "/人格 查看当前与列表\n"
+                "/人格 帮助 查看本说明\n"
                 "/人格切换 <编号或ID>\n"
                 "/人格当前\n"
                 "/人格重置\n"
@@ -880,7 +881,7 @@ class PersonaSwitcherPlugin(Star):
             )
             return
 
-        if lowered in {"列表", "list", "ls"}:
+        if lowered in {"", "列表", "list", "ls"}:
             yield event.plain_result(await self._render_list(umo))
             return
 
