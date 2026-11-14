@@ -48,5 +48,93 @@
       "max": 100,
       "step": 1
     }
+  },
+  "group_vote": {
+    "description": "群聊切换投票",
+    "type": "object",
+    "hint": "群聊里切换人格不再直接生效，而是发起投票；投票人必须引用提案消息。",
+    "items": {
+      "enabled": {
+        "description": "启用群聊投票",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后回到「管理员/用户指令直接切换」。"
+      },
+      "ratio": {
+        "description": "通过票数占群人数的比例",
+        "type": "float",
+        "default": 0.02,
+        "slider": {
+          "min": 0.01,
+          "max": 0.5,
+          "step": 0.01
+        },
+        "hint": "按群人数向上取整，再受下限/上限约束。默认 2%。"
+      },
+      "min_votes": {
+        "description": "最少通过票数",
+        "type": "int",
+        "default": 3,
+        "slider": {
+          "min": 1,
+          "max": 50,
+          "step": 1
+        }
+      },
+      "max_votes": {
+        "description": "最多通过票数",
+        "type": "int",
+        "default": 20,
+        "hint": "大群人数多时封顶，避免要求几十票。0 表示不封顶。",
+        "slider": {
+          "min": 0,
+          "max": 200,
+          "step": 1
+        }
+      },
+      "default_threshold": {
+        "description": "群人数取不到时的默认票数",
+        "type": "int",
+        "default": 5,
+        "slider": {
+          "min": 1,
+          "max": 50,
+          "step": 1
+        }
+      },
+      "timeout_seconds": {
+        "description": "投票有效时长（秒）",
+        "type": "int",
+        "default": 300,
+        "slider": {
+          "min": 60,
+          "max": 1800,
+          "step": 30
+        }
+      },
+      "count_proposer": {
+        "description": "发起人自动计 1 票",
+        "type": "bool",
+        "default": true
+      },
+      "require_quote": {
+        "description": "必须引用提案消息才算票",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后，投票期间任何人发「同意」都算票，容易被刷票。"
+      },
+      "keywords": {
+        "description": "赞成票关键词",
+        "type": "list",
+        "default": ["同意", "赞成", "支持", "+1", "yes", "agree"],
+        "hint": "消息中包含任一关键词即视为赞成；「不同意」这类否定表达会被排除。"
+      },
+      "admin_bypass": {
+        "description": "管理员可跳过投票",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后管理员在群里切换也要走投票。"
+      }
+    }
   }
 }

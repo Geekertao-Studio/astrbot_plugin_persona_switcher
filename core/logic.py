@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
 
 RESERVED_DEFAULT_PERSONA = "default"
@@ -101,3 +103,52 @@ def summarize_prompt(prompt: str | None, limit: int = 60) -> str:
         if text:
             return text if len(text) <= limit else text[:limit] + "…"
     return ""
+
+
+def calc_vote_threshold(
+    member_count: int,
+    ratio: float = 0.02,
+    min_votes: int = 3,
+    max_votes: int = 20,
+    fallback: int = 5,
+) -> int:
+    """按群人数算通过票数：ceil(人数 × 比例)，再夹在上下限之间。"""
+    if member_count <= 0:
+        return max(1, int(fallback))
+    need = math.ceil(member_count * max(0.0, float(ratio)))
+    need = max(need, int(min_votes))
+    if max_votes and max_votes > 0:
+        need = min(need, int(max_votes))
+    need = min(need, member_count)
+    return max(1, need)
+
+
+AGREE_PATTERN = re.compile(r"同意|赞成|支持|附议|\+1|yes|agree|ok", re.IGNORECASE)
+DISAGREE_PATTERN = re.compile(
+    r"(?:不|没|别|拒绝|反对)\s*(?:同意|赞成|支持|附议)|不同意|反对",
+    re.IGNORECASE,
+)
+
+
+def is_agree_text(text: str, keywords: list[str] | None = None) -> bool:
+    """判断一条消息是不是赞成票，先排除「不同意」这类否定表达。"""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if DISAGREE_PATTERN.search(raw):
+        return False
+    if keywords:
+        lowered = raw.lower()
+        return any(str(k).strip().lower() in lowered for k in keywords if str(k).strip())
+    return bool(AGREE_PATTERN.search(raw))
+
+
+def format_seconds(seconds: int) -> str:
+    """把秒数变成人看的短文本。"""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds} 秒"
+    minutes, rest = divmod(seconds, 60)
+    if rest:
+        return f"{minutes} 分 {rest} 秒"
+    return f"{minutes} 分钟"
