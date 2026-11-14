@@ -926,6 +926,21 @@ class PersonaSwitcherPlugin(Star):
         """列出可切换的人格。"""
         yield event.plain_result(await self._render_list(event.unified_msg_origin))
 
+    @filter.command("人格帮助", alias={"人设帮助", "persona_help"})
+    async def cmd_persona_help(self, event: AstrMessageEvent):
+        """查看人格插件指令说明。"""
+        yield event.plain_result(
+            "人格切换\n"
+            "/人格 查看当前与列表\n"
+            "/人格 帮助 查看本说明\n"
+            "/人格切换 <编号或ID>\n"
+            "/人格当前\n"
+            "/人格重置\n"
+            "/人格投票 查看群投票进度（/人格投票取消 取消）\n"
+            "群聊切换需要投票，投票请引用提案消息。\n"
+            "管理员还可用 /人格允许、/人格禁止。"
+        )
+
     @filter.command("人格当前", alias={"人设当前", "persona_current"})
     async def cmd_current(self, event: AstrMessageEvent):
         """查看当前人格。"""
