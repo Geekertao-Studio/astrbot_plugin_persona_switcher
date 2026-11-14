@@ -413,7 +413,7 @@ class PersonaSwitcherPlugin(Star):
                 return True
         return False
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(priority=-100)
     async def on_llm_request(self, event: AstrMessageEvent, req=None):
         """下一轮 LLM 请求前，把假切换落实；引用确认则先清空上下文。"""
         pending = self._pending.pop(event.unified_msg_origin, None)
