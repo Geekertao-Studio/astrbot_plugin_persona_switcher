@@ -15,7 +15,6 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 from astrbot.core.config.astrbot_config import AstrBotConfig
-from astrbot.core.session_overrides import get_overrides, update_overrides
 
 try:  # AstrBot >= 4.29
     from astrbot.api.web import error_response, json_response, request
@@ -53,10 +52,6 @@ from .core.logic import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_persona_switcher"
-PERSONA_OVERRIDE_KEYS = (
-    "agent.config.persona.persona_id",
-    "agent.config.persona_id",
-)
 
 try:  # 4.x 内部类型；老版本没有就退回普通字符串
     from astrbot.core.star.filter.command import GreedyStr
@@ -143,14 +138,6 @@ class PersonaSwitcherPlugin(Star):
         except Exception:
             logger.debug("[persona-switcher] 读取会话人格失败", exc_info=True)
 
-        try:
-            overrides = await get_overrides(umo)
-        except Exception:
-            overrides = {}
-        for key in PERSONA_OVERRIDE_KEYS:
-            if overrides.get(key):
-                return overrides[key]
-
         return self._default_persona_id(umo)
 
     def _default_persona_id(self, umo: str) -> str:
@@ -185,14 +172,14 @@ class PersonaSwitcherPlugin(Star):
 
     async def _reset_persona(self, event: AstrMessageEvent) -> None:
         umo = event.unified_msg_origin
-        await update_overrides(umo, {key: None for key in PERSONA_OVERRIDE_KEYS})
         cid = await self.context.conversation_manager.get_curr_conversation_id(umo)
-        if cid:
-            await self.context.conversation_manager.update_conversation(
-                unified_msg_origin=umo,
-                conversation_id=cid,
-                persona_id="",
-            )
+        # persona_id 传空串时，ConversationManager 会把会话覆盖里的
+        # persona 路径置为 None，相当于恢复继承默认人格。
+        await self.context.conversation_manager.update_conversation(
+            unified_msg_origin=umo,
+            conversation_id=cid,
+            persona_id="",
+        )
 
     def _scope_error(self, event: AstrMessageEvent) -> str | None:
         if event.is_private_chat() and not self._cfg_bool("allow_private_chat", True):
