@@ -16,7 +16,12 @@ import time
 from dataclasses import dataclass, field
 
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.event import (
+    AstrMessageEvent,
+    MessageChain,
+    MessageEventResult,
+    filter,
+)
 from astrbot.api.message_components import Plain, Reply
 from astrbot.api.star import Context, Star
 from astrbot.core.config.astrbot_config import AstrBotConfig
@@ -145,6 +150,75 @@ class GroupVoteFilter(filter.CustomFilter):
         if session.require_quote and not _reply_matches(event, session):
             return False
         return True
+
+
+class UnknownPersonaCommandFilter(filter.CustomFilter):
+    """兜住 /人格 的未知子命令，避免它们掉进 LLM。"""
+
+    _TOP = {
+        "人格",
+        "人设",
+        "persona",
+        "人格列表",
+        "人设列表",
+        "persona_list",
+        "人格当前",
+        "人设当前",
+        "persona_current",
+        "人格切换",
+        "人设切换",
+        "切人格",
+        "persona_switch",
+        "人格重置",
+        "人设重置",
+        "persona_reset",
+        "人格投票",
+        "投票切换",
+        "persona_vote",
+        "人格允许",
+        "人设允许",
+        "persona_allow",
+        "人格禁止",
+        "人设禁止",
+        "persona_deny",
+        "人格帮助",
+        "人设帮助",
+        "persona_help",
+    }
+    _ACTIONS = {
+        "帮助",
+        "列表",
+        "当前",
+        "重置",
+        "允许",
+        "禁止",
+        "切换",
+        "投票",
+        "help",
+        "list",
+        "current",
+        "reset",
+        "allow",
+        "deny",
+        "switch",
+        "vote",
+    }
+
+    def filter(self, event: AstrMessageEvent, cfg) -> bool:
+        text = (event.message_str or "").strip()
+        while text[:1] in {"/", "!", "！", "。"}:
+            text = text[1:].lstrip()
+        parts = text.split()
+        if not parts:
+            return False
+        first = parts[0]
+        if first in self._TOP:
+            return False
+        if first in {"人格", "人设", "persona"}:
+            return len(parts) > 1 and parts[1] not in self._ACTIONS
+        return any(
+            first.startswith(prefix) for prefix in ("人格", "人设", "persona")
+        )
 
 
 class PersonaSwitcherPlugin(Star):
@@ -940,6 +1014,17 @@ class PersonaSwitcherPlugin(Star):
             "群聊切换需要投票，投票请引用提案消息。\n"
             "管理员还可用 /人格允许、/人格禁止。"
         )
+
+    @filter.custom_filter(UnknownPersonaCommandFilter, False)
+    async def unknown_persona_command(self, event: AstrMessageEvent):
+        """未知人格指令兜底：直接提示，不进入 LLM。"""
+        event.set_result(
+            MessageEventResult().message(
+                "❌ 未知的人格指令，本次不会调用 AI。\n"
+                "可用：/人格、/人格切换 <编号>、/人格当前、/人格重置、/人格帮助"
+            )
+        )
+        event.stop_event()
 
     @filter.command("人格当前", alias={"人设当前", "persona_current"})
     async def cmd_current(self, event: AstrMessageEvent):
