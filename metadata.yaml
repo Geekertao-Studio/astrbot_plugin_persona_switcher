@@ -2,7 +2,7 @@ name: astrbot_plugin_persona_switcher
 display_name: 人格切换
 desc: 让用户用指令在管理员指定的「可切换人格」里自由切换，支持后台勾选白名单、会话级隔离、与 WebUI 人格设置互通，无第三方服务依赖。
 short_desc: 用户可在管理员允许的人格之间切换
-version: v1.0.0
+version: v1.0.1
 author: Geekertao-Studio
 repo: https://github.com/Geekertao-Studio/astrbot_plugin_persona_switcher.git
 astrbot_version: ">=4.16,<5"
