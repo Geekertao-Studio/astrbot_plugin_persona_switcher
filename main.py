@@ -107,6 +107,30 @@ class PendingSwitch:
 
 
 ACTIVE_VOTES: dict[str, VoteSession] = {}
+PENDING_SWITCHES: dict[str, PendingSwitch] = {}
+
+
+def _is_clear_confirm_event(event: AstrMessageEvent, pending: PendingSwitch) -> bool:
+    text = re.sub(r"\s+", "", event.message_str or "").strip("，。！!?？~～")
+    if not (
+        text in {"是", "是的", "同意", "确认", "清空", "好", "yes"}
+        or any(word in text for word in ("同意", "确认", "清空"))
+    ):
+        return False
+    self_id = str(event.get_self_id() or "")
+    for component in event.get_messages():
+        if not isinstance(component, Reply):
+            continue
+        sender_id = str(getattr(component, "sender_id", "") or "")
+        if sender_id and self_id and sender_id != self_id:
+            continue
+        quoted_text = (
+            f"{getattr(component, 'message_str', '') or ''} "
+            f"{getattr(component, 'text', '') or ''}"
+        )
+        if pending.code and pending.code in quoted_text:
+            return True
+    return False
 
 
 def _reply_matches(event: AstrMessageEvent, session: VoteSession) -> bool:
@@ -221,6 +245,29 @@ class UnknownPersonaCommandFilter(filter.CustomFilter):
         )
 
 
+class PersonaSwitchConfirmFilter(filter.CustomFilter):
+    """只匹配「引用切换确认消息 + 是/同意」的那一条。"""
+
+    def filter(self, event: AstrMessageEvent, cfg) -> bool:
+        pending = PENDING_SWITCHES.get(event.unified_msg_origin)
+        if not pending:
+            return False
+        return _is_clear_confirm_event(event, pending)
+
+
+class PendingSwitchApplyFilter(filter.CustomFilter):
+    """待确认状态下，用户直接发下一条普通消息：先落实切换，再让 LLM 回答。"""
+
+    def filter(self, event: AstrMessageEvent, cfg) -> bool:
+        pending = PENDING_SWITCHES.get(event.unified_msg_origin)
+        if not pending:
+            return False
+        text = (event.message_str or "").strip()
+        if not text or text.startswith(("/", "!", "！")):
+            return False
+        return not _is_clear_confirm_event(event, pending)
+
+
 class PersonaSwitcherPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -228,7 +275,7 @@ class PersonaSwitcherPlugin(Star):
         self.config = config
         self._save_lock = asyncio.Lock()
         self._votes: dict[str, VoteSession] = ACTIVE_VOTES
-        self._pending: dict[str, PendingSwitch] = {}
+        self._pending: dict[str, PendingSwitch] = PENDING_SWITCHES
 
         context.register_web_api(
             f"/{PLUGIN_NAME}/state",
@@ -471,26 +518,64 @@ class PersonaSwitcherPlugin(Star):
 
     @staticmethod
     def _is_clear_confirm(event: AstrMessageEvent, pending: PendingSwitch) -> bool:
-        text = re.sub(r"\s+", "", event.message_str or "").strip("，。！!?？~～")
-        if not (
-            text in {"是", "是的", "同意", "确认", "清空", "好", "yes"}
-            or any(word in text for word in ("同意", "确认", "清空"))
-        ):
-            return False
-        self_id = str(event.get_self_id() or "")
-        for component in event.get_messages():
-            if not isinstance(component, Reply):
-                continue
-            sender_id = str(getattr(component, "sender_id", "") or "")
-            if sender_id and self_id and sender_id != self_id:
-                continue
-            quoted_text = (
-                f"{getattr(component, 'message_str', '') or ''} "
-                f"{getattr(component, 'text', '') or ''}"
+        return _is_clear_confirm_event(event, pending)
+
+    @filter.custom_filter(PersonaSwitchConfirmFilter, False)
+    async def confirm_persona_switch(self, event: AstrMessageEvent):
+        """引用确认消息回「是/同意」：清空上下文并立即切换，不再让旧人格回一句。"""
+        pending = PENDING_SWITCHES.pop(event.unified_msg_origin, None)
+        if not pending:
+            return
+        try:
+            await self._clear_context(event)
+            if pending.action == "reset":
+                await self._reset_persona(event)
+                target = getattr(
+                    self.context.persona_manager, "default_persona", "default"
+                ) or "default"
+                label = "默认人格"
+            else:
+                await self._apply_persona(event, pending.target)
+                target = pending.target
+                label = pending.target
+            self._sync_current_message_config(event, target)
+        except Exception as exc:
+            logger.exception("[persona-switcher] 确认切换失败")
+            event.set_result(
+                MessageEventResult().message(f"❌ 切换失败：{exc}")
             )
-            if pending.code and pending.code in quoted_text:
-                return True
-        return False
+            event.stop_event()
+            return
+        event.set_result(
+            MessageEventResult().message(
+                f"✅ 已清空上下文，切换到「{label}」。"
+            )
+        )
+        event.stop_event()
+
+    @filter.custom_filter(PendingSwitchApplyFilter, False)
+    async def apply_pending_switch(self, event: AstrMessageEvent):
+        """不引用确认、直接发下一句：保留上下文并落实切换。"""
+        pending = PENDING_SWITCHES.pop(event.unified_msg_origin, None)
+        if not pending:
+            return
+        try:
+            if pending.action == "reset":
+                await self._reset_persona(event)
+                target = getattr(
+                    self.context.persona_manager, "default_persona", "default"
+                ) or "default"
+            else:
+                await self._apply_persona(event, pending.target)
+                target = pending.target
+            self._sync_current_message_config(event, target)
+            logger.info(
+                "[persona-switcher] 下一轮消息触发切换 %s -> %s（保留上下文）",
+                pending.code,
+                target,
+            )
+        except Exception:
+            logger.exception("[persona-switcher] 落实待确认切换失败")
 
     def _sync_current_message_config(
         self, event: AstrMessageEvent, persona_id: str
